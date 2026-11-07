@@ -4,3 +4,4 @@
 table:not(.heat){display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
 table:not(.heat) th,table:not(.heat) td{white-space:nowrap;min-width:0;max-width:none;overflow-wrap:normal;padding:8px 10px}
 table:not(.heat) td:first-child,table:not(.heat) th:first-child{position:sticky;left:0;background:var(--panel,#141f30);z-index:1;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
+.heat td,.heat th{white-space:nowrap}
