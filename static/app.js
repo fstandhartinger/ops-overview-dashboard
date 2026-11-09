@@ -224,14 +224,15 @@ const custLabel = l => String(l || '').replace(/^acct /, 'Konto ');
 function modelColor(m) { const i = MODEL_ORDER.indexOf(m); return i >= 0 && i < 6 ? ['--s1', '--s2', '--s3', '--s7', '--s5', '--s6'][i] : '--s-other'; }
 
 /* ================= sections ================= */
+const arr = x => Array.isArray(x) ? x : [];
 function renderHero() {
   const st = S.status || {level: 'warn', headline: 'Status unbekannt', reasons: []};
   const t = meta('traffic').data?.now || {}, cap = meta('capacity').data || {}, ops = meta('ops').data || {}, mon = meta('money').data || {};
   const tr = meta('traffic');
-  const needsN = (ops.needs?.cards || []).filter(c => c.age_h <= 168).length + (ops.needs?.due?.length || 0);
-  const oldN = (ops.needs?.cards || []).filter(c => !(c.age_h <= 168)).length;
+  const needsN = arr(ops.needs?.cards).length + arr(ops.needs?.due).length;
+  const expN = arr(ops.needs?.cards_expired).length;
   const icon = {ok: '✓', warn: '!', crit: '×'}[st.level] || '?';
-  const needLine = needsN ? `<p class="needs-line"><a href="#dich"><b>Für dich:</b> ${needsN} offene Karte${needsN === 1 ? '' : 'n'} der letzten 7 Tage →</a></p>` : `<p class="needs-line muted">Für dich: nichts offen.</p>`;
+  const needLine = needsN ? `<p class="needs-line"><a href="#dich"><b>Für dich:</b> ${needsN} offene Karte${needsN === 1 ? '' : 'n'} →</a></p>` : `<p class="needs-line muted">Für dich: nichts offen.</p>`;
   const levelWord = {ok: 'Grün', warn: 'Gelb', crit: 'Rot'}[st.level] || '';
   const pe = st.errors;
   const gwOk = cap.gateway?.ok, att = cap.attesters || {};
@@ -250,24 +251,24 @@ function renderHero() {
       ${kpi('Antwortzeit', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, `p50/p95 1 h · 24 h p95 ${ms(t.p95_ms_24h)}`, '', '#kunden', t.p95_ms_1h > 2 * t.p95_ms_24h && t.p95_ms_1h > 3000)}
       ${kpi('API · Prüfknoten', `${gwOk === true ? '<span class="dot ok"></span> online' : gwOk === false ? '<span class="dot crit"></span> gestört' : '–'}`, isNum(att.total) ? `Prüfknoten ${num(att.up)}/${num(att.total)} aktiv` : 'Attester: kein Stand', '', '#kapazitaet', gwOk === false)}
       ${kpi('Verbrauch heute (UTC)', eur(mon.revenue?.usage_value?.today), `7 T ${eur(mon.revenue?.usage_value?.d7, 0)} · Einzahlungen heute ${eur(mon.revenue?.today, 0)}`, sparkSVG((mon.revenue?.usage_value?.daily_30d || []).slice(-15, -1).map(d => d[1]), '--s1'), '#geld')}
-      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', `Karten der letzten 7 Tage${oldN ? ` · +${oldN} ältere` : ''}`, '', '#dich', needsN > 0 ? 'warn' : false)}
+      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', `noch beantwortbar${expN ? ` · abgelaufen, unbeantwortet: ${expN}` : ''}`, '', '#dich', needsN > 0 ? 'warn' : false)}
     </div>
   </section>`;
 }
 
 function renderNeeds() {
   const m = meta('ops'), n = m.data?.needs;
-  const all = (n?.cards || []).slice().sort((a, b) => a.age_h - b.age_h);
-  const cards = all.filter(c => c.age_h <= 168), older = all.filter(c => !(c.age_h <= 168)), due = n?.due || [];
-  const li = c => `<li><span class="pill ${c.age_h > 24 ? 'warn' : ''}">#${esc(c.card)}</span><div><div class="n-title">${esc(c.title)}</div><div class="n-meta">${c.source && c.source !== 'unknown' ? esc(c.source) + ' · ' : ''}${c.buttons ? 'mit Knöpfen' : 'Antwort per Text'}</div></div><span class="age">${ageH(c.age_h)}</span></li>`;
+  const byAge = (a, b) => a.age_h - b.age_h;
+  const cards = arr(n?.cards).slice().sort(byAge), expired = arr(n?.cards_expired).slice().sort(byAge), due = arr(n?.due);
+  const li = (c, quiet) => `<li><span class="pill ${!quiet && c.age_h > 24 ? 'warn' : ''}">#${esc(c.card)}</span><div><div class="n-title">${esc(c.title)}</div><div class="n-meta">${c.source && c.source !== 'unknown' ? esc(c.source) + ' · ' : ''}${c.buttons ? 'mit Knöpfen' : 'Antwort per Text'}</div></div><span class="age">${ageH(c.age_h)}</span></li>`;
   let body;
   if (!n) body = noData('Keine Daten zu offenen Karten.');
-  else if (!cards.length && !due.length) body = `<div class="empty"><span class="big" aria-hidden="true">✓</span><div><b>Nichts offen.</b><div class="muted">Keine Karte der letzten 7 Tage wartet auf deine Antwort.</div></div></div>`;
-  else body = `<ul class="needs">${cards.map(li).join('')}
+  else if (!cards.length && !due.length) body = `<div class="empty"><span class="big" aria-hidden="true">✓</span><div><b>Nichts offen.</b><div class="muted">Keine Karte wartet gerade auf deine Antwort.</div></div></div>`;
+  else body = `<ul class="needs">${cards.map(c => li(c)).join('')}
     ${due.map(d => `<li><span class="pill warn">fällig</span><div><div class="n-title">${esc(d.title)}</div><div class="n-meta">${esc(d.owner || '')}${d.due ? ' · bis ' + esc(new Date(d.due).toLocaleString(LOC, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin'})) : ''}</div></div><span class="age">${esc(d.id)}</span></li>`).join('')}</ul>`;
-  if (older.length) body += `<details class="more"><summary>${older.length} ältere offene Karte${older.length === 1 ? '' : 'n'} (älter als 7 Tage — prüfen, ob noch aktuell)</summary><ul class="needs">${older.map(li).join('')}</ul></details>`;
+  if (expired.length) body += `<details class="more"><summary>abgelaufen, unbeantwortet: ${expired.length}</summary><p class="muted">Antwortfenster vorbei — eine Antwort weckt keinen Agenten mehr. Nur zur Info.</p><ul class="needs">${expired.map(c => li(c, true)).join('')}</ul></details>`;
   return `<section class="sec" id="dich"><header><h2>Braucht dich</h2><span class="sec-sum">${cards.length + due.length ? `${cards.length} Karte${cards.length === 1 ? ' wartet' : 'n warten'} auf dich${due.length ? `, ${due.length} fällige Entscheidung${due.length === 1 ? '' : 'en'}` : ''}.` : 'Gerade wartet nichts auf dich.'}</span></header>
-    ${card({title: 'Offene Telegram-Karten &amp; Entscheidungen', sub: 'Nur Karten mit Frage an dich, unbeantwortet und nicht erledigt', as_of: n?.as_of || m.as_of, maxAge: 45, body, error: m.error})}</section>`;
+    ${card({title: 'Offene Telegram-Karten &amp; Entscheidungen', sub: 'Nur Karten mit Frage an dich, die du noch beantworten kannst (Antwortfenster offen, nicht erledigt)', as_of: n?.as_of || m.as_of, maxAge: 45, body, error: m.error})}</section>`;
 }
 const ageH = h => !isNum(h) ? '' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${nf(h < 10 ? 1 : 0).format(h)} h` : `${Math.round(h / 24)} T`;
 
