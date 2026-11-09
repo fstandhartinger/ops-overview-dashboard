@@ -100,6 +100,7 @@ class Handler(BaseHTTPRequestHandler):
     global SNAPSHOT
     body=json.dumps(value,ensure_ascii=False,allow_nan=False)
     with LOCK:
+     if value['as_of']>time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(time.time()+600)):return self.send(400,'Stand liegt in der Zukunft.')
      if isinstance(SNAPSHOT.get('as_of'),str) and value['as_of']<SNAPSHOT['as_of']:return self.send(409,'Älterer Stand abgelehnt.')
      # Atomic private persistence; keep the old snapshot if the write fails.
      fd,name=tempfile.mkstemp(dir=DATA,prefix='.snapshot-')
