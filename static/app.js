@@ -251,7 +251,7 @@ function renderHero() {
       ${kpi('Antwortzeit', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, `p50/p95 1 h · 24 h p95 ${ms(t.p95_ms_24h)}`, '', '#kunden', t.p95_ms_1h > 2 * t.p95_ms_24h && t.p95_ms_1h > 3000)}
       ${kpi('API · Prüfknoten', `${gwOk === true ? '<span class="dot ok"></span> online' : gwOk === false ? '<span class="dot crit"></span> gestört' : '–'}`, isNum(att.total) ? `Prüfknoten ${num(att.up)}/${num(att.total)} aktiv` : 'Attester: kein Stand', '', '#kapazitaet', gwOk === false)}
       ${kpi('Verbrauch heute (UTC)', eur(mon.revenue?.usage_value?.today), `7 T ${eur(mon.revenue?.usage_value?.d7, 0)} · Einzahlungen heute ${eur(mon.revenue?.today, 0)}`, sparkSVG((mon.revenue?.usage_value?.daily_30d || []).slice(-15, -1).map(d => d[1]), '--s1'), '#geld')}
-      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', `noch beantwortbar${expN ? ` · abgelaufen, unbeantwortet: ${expN}` : ''}`, '', '#dich', needsN > 0 ? 'warn' : false)}
+      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', expN ? `${expN} abgelaufen, unbeantwortet` : 'nur beantwortbare Karten', '', '#dich', needsN > 0 ? 'warn' : false)}
     </div>
   </section>`;
 }
