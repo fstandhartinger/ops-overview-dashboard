@@ -1,1 +1,33 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Betriebsüberblick</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head><body><header><div><p class="eyebrow">PRIVATER BETRIEBSÜBERBLICK</p><h1>Umsatz. Nutzung. Kosten.</h1><p id="stand">Daten werden geladen …</p></div><form method="post" action="/logout"><button>Abmelden</button></form></header><nav><a href="#ueberblick">Überblick</a><a href="#kunden">Kunden</a><a href="#gpu">GPU-Server</a><a href="#modelle">Modelle</a><a href="#volumen">Volumen</a><a href="#zeiten">Tageszeiten</a><a href="#kosten">Ausblick</a><a href="#vertrieb">Vertrieb</a></nav><main><p id="error" role="status"></p><div id="content"></div></main><footer>Automatische Aktualisierung alle 5 Minuten. Geldbeträge in EUR. Umsatzwerte sind Netto-Wallet-Aufladungen vor Gebühren; Kosten sind Monats-Hochrechnungen.</footer></body></html>
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<title>Cockpit · decisionmodels</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Cockpit</span></div>
+    <div class="top-meta"><span id="stand" class="muted">Lade Daten …</span></div>
+    <div class="top-actions">
+      <button id="theme" class="icon-btn" type="button" aria-label="Hell/Dunkel umschalten" title="Hell/Dunkel">◐</button>
+      <form method="post" action="/logout"><button class="icon-btn" type="submit" aria-label="Abmelden" title="Abmelden">⎋</button></form>
+    </div>
+  </div>
+  <nav class="chips" aria-label="Bereiche">
+    <a href="#lage">Lage</a><a href="#dich">Braucht dich</a><a href="#geld">Geld</a><a href="#kunden">Kunden &amp; Traffic</a><a href="#kapazitaet">Kapazität</a><a href="#sn92">SN92</a><a href="#betrieb">Betrieb</a>
+  </nav>
+</header>
+<main id="app" aria-live="polite">
+  <section class="hero skeleton" id="lage"><div class="sk-line"></div><div class="sk-line short"></div></section>
+</main>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<footer class="foot muted">Privat. Nur lesende Quellen. Beträge in EUR netto. Aktualisierung alle 15 min, Seite lädt jede Minute neu.</footer>
+</body>
+</html>

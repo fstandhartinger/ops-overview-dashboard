@@ -54,7 +54,7 @@ class Handler(BaseHTTPRequestHandler):
   return not origin or urlsplit(origin).netloc==self.headers.get('Host')
  def do_GET(self):
   path=urlsplit(self.path).path
-  if path=='/healthz':return self.send(200,'ok')
+  if path=='/healthz':return self.send(200,'ok' if SNAPSHOT else 'ok empty') # tells the collector to re-push after a redeploy; no data
   if path=='/login.css':return self.send(200,CSS,'text/css; charset=utf-8')
   if not self.authorized():return self.send(200,LOGIN,'text/html; charset=utf-8') if path=='/' else self.send(401,'Bitte anmelden.')
   if path=='/api/data':
