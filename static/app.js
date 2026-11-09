@@ -29,19 +29,20 @@ const dshort = d => d.toLocaleDateString(LOC, {day: 'numeric', month: 'numeric',
 const wd = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
 /** delta: signed change vs a named period; colour = direction × whether up is good; never colour alone (arrow + sign). */
-function delta(cur, prev, {upGood = true, label = '', abs = false} = {}) {
+function delta(cur, prev, {upGood = true, label = '', abs = false, neutral = false} = {}) {
   if (!isNum(cur) || !isNum(prev)) return `<span class="delta flat">– ${esc(label)}</span>`;
   if (prev === 0 && cur === 0) return `<span class="delta flat">± 0 ${esc(label)}</span>`;
   let txt, ch;
   if (abs || prev === 0) { ch = cur - prev; txt = (ch >= 0 ? '+' : '−') + num(Math.abs(ch), Math.abs(ch) < 10 && ch % 1 ? 1 : 0); }
   else { ch = (cur - prev) / Math.abs(prev); txt = (ch >= 0 ? '+' : '−') + nf(Math.abs(ch) < .1 ? 1 : 0).format(Math.abs(ch) * 100) + ' %'; }
   const flat = Math.abs(abs || prev === 0 ? ch : ch * 100) < 0.5;
-  const cls = flat ? 'flat' : (ch > 0) === upGood ? 'good' : 'bad';
+  const cls = flat || neutral ? 'flat' : (ch > 0) === upGood ? 'good' : 'bad';
   const arrow = flat ? '→' : ch > 0 ? '↑' : '↓';
   return `<span class="delta ${cls}">${arrow} ${txt} ${esc(label)}</span>`;
 }
 
 /* ---------- section meta: age + stale ---------- */
+const lv = v => ({ok: 'ok', warn: 'warn', crit: 'crit'})[v] || 'off';
 const STALE_MIN = {traffic: 30, money: 75, capacity: 30, sn92: 60 * 36, ops: 45};
 function meta(name) {
   const s = S?.sections?.[name];
@@ -151,7 +152,7 @@ function lines(node, {series, height = 170, yfmt = tick, tipfmt = v => num(v), x
   const dv = divs(ymax);
   for (let k = 0; k <= dv; k++) { const v = ymax * k / dv, yy = Math.round(Y(v)) + .5; el('line', {x1: padL, x2: W - padR, y1: yy, y2: yy, class: k ? 'grid-l' : 'base-l'}, svg); const t = el('text', {x: padL - 6, y: yy + 3.5, 'text-anchor': 'end'}, svg); t.textContent = yfmt(v); }
   const nt = Math.max(2, Math.min(6, Math.floor(iw / 70)));
-  for (let k = 0; k < nt; k++) { const t = x0 + (x1 - x0) * k / (nt - 1); const tx = el('text', {x: X(t), y: H - 5, 'text-anchor': k === 0 ? 'start' : k === nt - 1 ? 'end' : 'middle'}, svg); tx.textContent = xfmt(new Date(t)); }
+  for (let k = 0; k < nt; k++) { let t = x0 + (x1 - x0) * k / (nt - 1); if (x1 - x0 > 6 * 3.6e6) t = Math.round(t / 3.6e6) * 3.6e6; if (t < x0 || t > x1) continue; const tx = el('text', {x: X(t), y: H - 5, 'text-anchor': k === 0 ? 'start' : k === nt - 1 ? 'end' : 'middle'}, svg); tx.textContent = xfmt(new Date(t)); }
   series.slice().reverse().forEach(s => {
     if (!s.pts.length) return;
     const d = s.pts.map((p, i) => `${i ? 'L' : 'M'}${X(+p[0]).toFixed(1)},${Y(p[1] || 0).toFixed(1)}`).join('');
@@ -228,25 +229,28 @@ function renderHero() {
   const t = meta('traffic').data?.now || {}, cap = meta('capacity').data || {}, ops = meta('ops').data || {}, mon = meta('money').data || {};
   const tr = meta('traffic');
   const needsN = (ops.needs?.cards || []).filter(c => c.age_h <= 168).length + (ops.needs?.due?.length || 0);
+  const oldN = (ops.needs?.cards || []).filter(c => !(c.age_h <= 168)).length;
   const icon = {ok: '✓', warn: '!', crit: '×'}[st.level] || '?';
+  const needLine = needsN ? `<p class="needs-line"><a href="#dich"><b>Für dich:</b> ${needsN} offene Karte${needsN === 1 ? '' : 'n'} der letzten 7 Tage →</a></p>` : `<p class="needs-line muted">Für dich: nichts offen.</p>`;
   const levelWord = {ok: 'Grün', warn: 'Gelb', crit: 'Rot'}[st.level] || '';
-  const mini = (S.history?.points || []).slice(-96);
+  const pe = st.errors;
   const gwOk = cap.gateway?.ok, att = cap.attesters || {};
   const kpi = (label, value, sub, extra = '', href = '', attn = false) => `<a class="kpi${attn === 'warn' ? ' attn-warn' : attn ? ' attn' : ''}" href="${href}"><span class="k-label">${label}</span><span class="k-value">${value}</span><span class="k-sub">${sub}</span>${extra}</a>`;
-  const rpmSpark = (meta('traffic').data?.minutely_2h || []).map(r => r[1]);
-  return `<section class="hero lvl-${st.level}" id="lage" aria-labelledby="verdict-h">
+  const rpmSpark = (meta('traffic').data?.minutely_2h || []).slice(0, -1).map(r => r[1]); // drop the open minute
+  return `<section class="hero lvl-${lv(st.level)}" id="lage" aria-labelledby="verdict-h">
     <div>
       <div class="verdict"><div class="verdict-icon" aria-hidden="true">${icon}</div>
         <div><h1 id="verdict-h"><span class="sr">${levelWord}: </span>${esc(st.headline)}</h1><p>${esc(st.summary || '')}</p></div></div>
-      ${st.reasons?.length ? `<ul class="reasons">${st.reasons.map(r => `<li><span class="dot ${r.level}" aria-hidden="true"></span><span><span class="sr">${({ok: 'OK', warn: 'Achtung', crit: 'Kritisch'})[r.level]}: </span>${esc(r.text)}</span></li>`).join('')}</ul>` : ''}
+      ${needLine}
+      ${st.reasons?.length ? `<ul class="reasons">${st.reasons.map(r => `<li><span class="dot ${lv(r.level)}" aria-hidden="true"></span><span><span class="sr">${({ok: 'OK', warn: 'Achtung', crit: 'Kritisch', off: 'Info'})[lv(r.level)]}: </span>${esc(r.text)}</span></li>`).join('')}</ul>` : ''}
     </div>
     <div class="kpis">
-      ${kpi('Anfragen / min', num(t.req_per_min_5m, t.req_per_min_5m < 10 ? 1 : 0), `Ø 1 h: ${num(t.req_per_min_1h, 0)} · ${tr.stale ? '⚠ veraltet' : ago(tr.as_of)}`, sparkSVG(rpmSpark), '#kunden')}
-      ${kpi('Fehlerrate 1 h', pct(t.error_rate_1h), `24 h: ${pct(t.error_rate_24h)}`, '', '#kunden', t.error_rate_1h > .05)}
-      ${kpi('Latenz p50 / p95', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, 'letzte Stunde, erfolgreiche Anfragen', '', '#kunden', t.p95_ms_1h > 5000)}
-      ${kpi('Gateway · Attester', `${gwOk === true ? '<span class="dot ok"></span> online' : gwOk === false ? '<span class="dot crit"></span> gestört' : '–'}`, isNum(att.total) ? `Attester ${att.up}/${att.total} aktiv` : 'Attester: kein Stand', '', '#kapazitaet', gwOk === false)}
-      ${kpi('Umsatz heute', eur(mon.revenue?.today), `gestern ${eur(mon.revenue?.yesterday)} · 7 T ${eur(mon.revenue?.d7, 0)}`, sparkSVG((mon.revenue?.daily_60d || []).slice(-14).map(d => d.net), '--s3'), '#geld')}
-      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', needsN ? 'Karten &amp; fällige Entscheidungen' : 'keine offenen Karten', '', '#dich', needsN > 0 ? 'warn' : false)}
+      ${kpi('Anfragen / min (5 min)', num(t.req_per_min_5m, t.req_per_min_5m < 10 ? 1 : 0), `Ø 1 h: ${num(t.req_per_min_1h, 0)} · ${tr.stale ? '⚠ veraltet' : ago(tr.as_of)}`, sparkSVG(rpmSpark), '#kunden')}
+      ${kpi('Plattform-Fehler 1 h', pct(pe?.platform_rate_1h), pe ? `+ Kundenfehler ${pct(pe.customer_rate_1h)} · alle 24 h ${pct(t.error_rate_24h)}` : `alle 24 h: ${pct(t.error_rate_24h)}`, '', '#kunden', pe?.platform_rate_1h > .05)}
+      ${kpi('Antwortzeit', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, `p50/p95 1 h · 24 h p95 ${ms(t.p95_ms_24h)}`, '', '#kunden', t.p95_ms_1h > 2 * t.p95_ms_24h && t.p95_ms_1h > 3000)}
+      ${kpi('API · Prüfknoten', `${gwOk === true ? '<span class="dot ok"></span> online' : gwOk === false ? '<span class="dot crit"></span> gestört' : '–'}`, isNum(att.total) ? `Prüfknoten ${num(att.up)}/${num(att.total)} aktiv` : 'Attester: kein Stand', '', '#kapazitaet', gwOk === false)}
+      ${kpi('Verbrauch heute (UTC)', eur(mon.revenue?.usage_value?.today), `7 T ${eur(mon.revenue?.usage_value?.d7, 0)} · Einzahlungen heute ${eur(mon.revenue?.today, 0)}`, sparkSVG((mon.revenue?.usage_value?.daily_30d || []).slice(-15, -1).map(d => d[1]), '--s1'), '#geld')}
+      ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', `Karten der letzten 7 Tage${oldN ? ` · +${oldN} ältere` : ''}`, '', '#dich', needsN > 0 ? 'warn' : false)}
     </div>
   </section>`;
 }
@@ -261,54 +265,61 @@ function renderNeeds() {
   else if (!cards.length && !due.length) body = `<div class="empty"><span class="big" aria-hidden="true">✓</span><div><b>Nichts offen.</b><div class="muted">Keine Karte der letzten 7 Tage wartet auf deine Antwort.</div></div></div>`;
   else body = `<ul class="needs">${cards.map(li).join('')}
     ${due.map(d => `<li><span class="pill warn">fällig</span><div><div class="n-title">${esc(d.title)}</div><div class="n-meta">${esc(d.owner || '')}${d.due ? ' · bis ' + esc(new Date(d.due).toLocaleString(LOC, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin'})) : ''}</div></div><span class="age">${esc(d.id)}</span></li>`).join('')}</ul>`;
-  if (older.length) body += `<details class="more"><summary>${older.length} ältere offene Karte${older.length === 1 ? '' : 'n'} (über 7 Tage, vermutlich überholt)</summary><ul class="needs">${older.map(li).join('')}</ul></details>`;
+  if (older.length) body += `<details class="more"><summary>${older.length} ältere offene Karte${older.length === 1 ? '' : 'n'} (älter als 7 Tage — prüfen, ob noch aktuell)</summary><ul class="needs">${older.map(li).join('')}</ul></details>`;
   return `<section class="sec" id="dich"><header><h2>Braucht dich</h2><span class="sec-sum">${cards.length + due.length ? `${cards.length} Karte${cards.length === 1 ? ' wartet' : 'n warten'} auf dich${due.length ? `, ${due.length} fällige Entscheidung${due.length === 1 ? '' : 'en'}` : ''}.` : 'Gerade wartet nichts auf dich.'}</span></header>
     ${card({title: 'Offene Telegram-Karten &amp; Entscheidungen', sub: 'Nur Karten mit Frage an dich, unbeantwortet und nicht erledigt', as_of: n?.as_of || m.as_of, maxAge: 45, body, error: m.error})}</section>`;
 }
 const ageH = h => !isNum(h) ? '' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${nf(h < 10 ? 1 : 0).format(h)} h` : `${Math.round(h / 24)} T`;
 
 function renderMoney() {
-  const m = meta('money'), d = m.data || {}, r = d.revenue || {}, sp = d.spend || {}, mg = d.margin || {};
-  const ra = r.as_of, sa = sp.as_of;
+  const m = meta('money'), d = m.data || {}, r = d.revenue || {}, sp = d.spend || {}, uv = r.usage_value || {};
+  const ra = r.as_of, sa = sp.as_of, F = esc(FOCUS);
   const daily0 = (r.daily_60d || []).slice(-60), fi = daily0.findIndex(x => x.net > 0), daily = fi > 3 ? daily0.slice(fi - 1) : daily0;
-  const wizShare = r.wizville_share_30d;
-  const top = r.top_customers_30d || [];
-  // takeaway headline
-  const d7c = isNum(r.d7) && isNum(r.d7_prev) && r.d7_prev > 0 ? (r.d7 - r.d7_prev) / r.d7_prev : null;
-  const exWiz7 = daily.slice(-7).reduce((a, x) => a + (x.net - (x.wizville || 0)), 0), exWizPrev = daily.slice(-14, -7).reduce((a, x) => a + (x.net - (x.wizville || 0)), 0);
-  const revTitle = !daily.length ? 'Tagesumsatz' : `Umsatz 7 Tage ${d7c === null ? '' : d7c >= 0 ? `+${nf(0).format(d7c * 100)} %` : `−${nf(0).format(-d7c * 100)} %`} — ohne ${esc(FOCUS)} ${exWizPrev > 0 ? (exWiz7 >= exWizPrev ? '+' : '−') + nf(0).format(Math.abs(exWiz7 - exWizPrev) / exWizPrev * 100) + ' %' : eur(exWiz7, 0)}`;
-  mount('ch-rev', n => columns(n, {cats: daily.map(x => ({label: dshort(new Date(x.date)), long: new Date(x.date).toLocaleDateString(LOC, {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'}), partial: x.date === daily.at(-1)?.date})), series: [{name: FOCUS, color: '--s2', values: daily.map(x => x.wizville || 0)}, {name: 'Alle anderen', color: '--s1', values: daily.map(x => Math.max(0, x.net - (x.wizville || 0)))}], tipfmt: v => eur(v), yfmt: v => tick(v) + ' €'}));
-  const revenueCard = card({title: 'Umsatz', sub: 'Netto-Aufladungen externer Kunden, ohne interne Konten', as_of: ra, maxAge: 75, error: r.ok === false ? r.error : null, body: `
+  const focShare = r.focus_share_30d, top = r.top_customers_30d || [];
+  // one window for the whole title: the last 7 calendar days (incl. today) vs the 7 before
+  const sum = (a, f) => a.reduce((x, y) => x + f(y), 0);
+  const w = daily.slice(-7), wp = daily.slice(-14, -7);
+  const tot7 = sum(w, x => x.net), totP = sum(wp, x => x.net), ex7 = sum(w, x => x.net - (x.focus || 0)), exP = sum(wp, x => x.net - (x.focus || 0));
+  const chg = (a, b) => b > 0 ? `${a >= b ? '+' : '−'}${nf(0).format(Math.abs(a - b) / b * 100)} %` : '';
+  const revTitle = daily.length ? `Einzahlungen 7 Kalendertage ${eur(tot7, 0)} (${chg(tot7, totP) || 'neu'}) — ohne ${FOCUS} ${eur(ex7, 0)} (${chg(ex7, exP) || '–'})` : 'Einzahlungen pro Tag';
+  mount('ch-rev', n => columns(n, {cats: daily.map(x => ({label: dshort(new Date(x.date)), long: new Date(x.date).toLocaleDateString(LOC, {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'}), partial: x.date === daily.at(-1)?.date})), series: [{name: FOCUS, color: '--s2', values: daily.map(x => x.focus || 0)}, {name: 'Alle anderen', color: '--s1', values: daily.map(x => Math.max(0, x.net - (x.focus || 0)))}], tipfmt: v => eur(v), yfmt: v => tick(v) + ' €'}));
+  const ud = (uv.daily_30d || []).slice(-30);
+  mount('ch-use', n => columns(n, {height: 120, cats: ud.map(x => ({label: dshort(new Date(x[0])), long: new Date(x[0]).toLocaleDateString(LOC, {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'}), partial: x === ud.at(-1)})), series: [{name: 'Verbrauch', color: '--s1', values: ud.map(x => x[1])}], tipfmt: v => eur(v), yfmt: v => tick(v) + ' €'}));
+  const revenueCard = card({title: 'Geld rein', sub: 'Verbrauch = abgerechnete Nutzung · Einzahlungen = Guthaben-Aufladungen (netto, ohne interne Konten) · Tage in UTC', as_of: ra, maxAge: 75, error: r.ok === false ? r.error : null, body: `
     <div class="stats">
-      <div class="stat"><div class="s-label">Heute</div><div class="s-value">${eur(r.today)}</div><div class="s-delta">${delta(r.today, r.yesterday, {label: 'vs. gestern', abs: true})}</div></div>
-      <div class="stat"><div class="s-label">7 Tage</div><div class="s-value">${eur(r.d7)}</div><div class="s-delta">${delta(r.d7, r.d7_prev, {label: 'vs. Vorwoche'})}</div></div>
-      <div class="stat"><div class="s-label">30 Tage</div><div class="s-value">${eur(r.d30)}</div><div class="s-delta">${delta(r.d30, r.d30_prev, {label: 'vs. Vormonat'})}</div></div>
-      <div class="stat"><div class="s-label">Zahlende Kunden 30 T</div><div class="s-value">${num(r.payers_30d)}</div><div class="s-delta">${delta(r.payers_30d, r.payers_30d_prev, {label: 'vs. davor', abs: true})}</div></div>
-      <div class="stat"><div class="s-label">Neue Zahler 7 T</div><div class="s-value">${num(r.new_payers_7d)}</div><div class="s-delta">${delta(r.new_payers_7d, r.new_payers_prev_7d, {label: 'vs. Vorwoche', abs: true})}</div></div>
-      <div class="stat"><div class="s-label">${esc(FOCUS)}-Anteil 30 T</div><div class="s-value">${pct(wizShare, 0)}</div><div class="s-delta muted">Monat bisher ${eur(r.mtd, 0)}</div></div>
-    </div>`});
-  const chartCard = card({title: esc(revTitle), sub: `Netto pro Tag seit ${daily.length ? dshort(new Date(daily[0].date)) : '–'} · heutiger Tag läuft noch (blass)`, as_of: ra, maxAge: 75, body: `${legend([{name: 'Alle anderen', color: '--s1'}, {name: FOCUS, color: '--s2'}])}<div class="chart" id="ch-rev"></div>`});
-  const custCard = card({title: top.length ? `Top-Kunden 30 Tage — ${esc(top[0].label)} ${pct(top[0].share, 0)}` : 'Top-Kunden 30 Tage', sub: 'Netto-Aufladungen, Anteil am 30-Tage-Umsatz', as_of: ra, maxAge: 75, body: top.length ? `<div class="bars">${top.map(c => `<div class="bar-row"><span class="bl">${esc(c.label)}</span><span class="bv">${eur(c.net)} · ${pct(c.share, 0)}</span>${hbar(c.share)}</div>`).join('')}</div>
-      ${(r.new_payers || []).length ? `<details class="more"><summary>Neue Zahler (14 Tage): ${r.new_payers.length}</summary><div class="tbl-wrap"><table><thead><tr><th>Kunde</th><th class="r">Erste Zahlung</th><th class="r">Netto</th></tr></thead><tbody>${r.new_payers.map(p => `<tr><td>${esc(p.label)}</td><td class="r">${new Date(p.first_paid).toLocaleDateString(LOC, {day: 'numeric', month: 'short'})}</td><td class="r">${eur(p.net)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}` : noData()});
+      <div class="stat"><div class="s-label">Verbrauch heute</div><div class="s-value">${eur(uv.today)}</div><div class="s-delta muted">Tag läuft noch</div></div>
+      <div class="stat"><div class="s-label">Verbrauch 7 T</div><div class="s-value">${eur(uv.d7, 0)}</div><div class="s-delta muted">davon ${F} ${eur(uv.focus_d7, 0)}</div></div>
+      <div class="stat"><div class="s-label">Einzahlungen heute</div><div class="s-value">${eur(r.today)}</div><div class="s-delta muted">läuft noch · gestern ${eur(r.yesterday, 0)}</div></div>
+      <div class="stat"><div class="s-label">Einzahlungen 7 T</div><div class="s-value">${eur(r.d7, 0)}</div><div class="s-delta">${delta(r.d7, r.d7_prev, {label: 'vs. 7 T davor'})}</div></div>
+      <div class="stat"><div class="s-label">Einzahlungen 30 T</div><div class="s-value">${eur(r.d30, 0)}</div><div class="s-delta">${delta(r.d30, r.d30_prev, {label: 'vs. 30 T davor'})}</div></div>
+      <div class="stat"><div class="s-label">Zahlende Kunden 30 T</div><div class="s-value">${num(r.payers_30d)}</div><div class="s-delta">${delta(r.payers_30d, r.payers_30d_prev, {label: 'vs. 30 T davor', abs: true})}</div></div>
+      <div class="stat"><div class="s-label">Neue Zahler 7 T</div><div class="s-value">${num(r.new_payers_7d)}</div><div class="s-delta">${delta(r.new_payers_7d, r.new_payers_prev_7d, {label: 'vs. 7 T davor', abs: true})}</div></div>
+      <div class="stat"><div class="s-label">${F}-Anteil 30 T</div><div class="s-value">${pct(focShare, 0)}</div><div class="s-delta muted">der Einzahlungen</div></div>
+      <div class="stat"><div class="s-label">Monat bisher</div><div class="s-value">${eur(r.mtd, 0)}</div><div class="s-delta muted">Einzahlungen seit 1. (UTC)</div></div>
+    </div>
+    ${ud.length ? `<p class="sub">Verbrauch pro Tag, 30 Tage</p><div class="chart" id="ch-use"></div>` : ''}`});
+  const chartCard = card({title: esc(revTitle), sub: `Einzahlungen netto pro Tag seit ${daily.length ? dshort(new Date(daily[0].date)) : '–'} · heutiger Tag läuft noch (blass)`, as_of: ra, maxAge: 75, body: `${legend([{name: 'Alle anderen', color: '--s1'}, {name: FOCUS, color: '--s2'}])}<div class="chart" id="ch-rev"></div>`});
+  const custCard = card({title: top.length ? `Top-Kunden 30 Tage — ${esc(custLabel(top[0].label))} ${pct(top[0].share, 0)}` : 'Top-Kunden 30 Tage', sub: 'Einzahlungen netto, Anteil an allen Einzahlungen der 30 Tage', as_of: ra, maxAge: 75, body: top.length ? `<div class="bars">${top.map(c => `<div class="bar-row"><span class="bl">${esc(custLabel(c.label))}</span><span class="bv">${eur(c.net)} · ${pct(c.share, 0)}</span>${hbar(c.share)}</div>`).join('')}</div>
+      ${(r.new_payers || []).length ? `<details class="more"><summary>Neue Zahler (14 Tage): ${r.new_payers.length}</summary><div class="tbl-wrap"><table><thead><tr><th>Kunde</th><th class="r">Erste Zahlung</th><th class="r">Netto gesamt</th></tr></thead><tbody>${r.new_payers.map(p => `<tr><td>${esc(custLabel(p.label))}</td><td class="r">${new Date(p.first_paid).toLocaleDateString(LOC, {day: 'numeric', month: 'short'})}</td><td class="r">${eur(p.net)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}` : noData()});
   const burn = sp.burn_eur_per_h, allIn = isNum(sp.burn_all_in_eur_per_h) ? sp.burn_all_in_eur_per_h : burn;
-  const dv = S.derived?.spend || {};
+  const dv = S.derived?.spend || {}, trackedDays = (dv.days || []).filter(x => dv.tracked_since && x[0] >= dv.tracked_since).length;
   const now_ = new Date(), dim = new Date(Date.UTC(now_.getUTCFullYear(), now_.getUTCMonth() + 1, 0)).getUTCDate();
   const runRateMonth = isNum(allIn) ? allIn * 24 * dim : null;
-  const revDay = isNum(r.d7) ? r.d7 / 7 : null, costDay = isNum(allIn) ? allIn * 24 : null;
-  const bal = isNum(revDay) && isNum(costDay) ? revDay - costDay : null;
+  const useDay = isNum(uv.d7) ? uv.d7 / 7 : null, costDay = isNum(allIn) ? allIn * 24 : null;
+  const bal = isNum(useDay) && isNum(costDay) ? useDay - costDay : null;
   const runway = sp.upcloud_runway_days;
-  const spendCard = card({title: isNum(allIn) ? `GPU-Kosten ${eur(allIn, 2)}/h — im Monatstempo ${eur(runRateMonth, 0)}` : 'GPU-Kosten', sub: 'Live aus dem Kosten-Monitor (nur gelesen) · nur GPU, ohne CPU-Server, Werbung, Gebühren · USD→EUR fix 1,20', as_of: sa, maxAge: 45, error: sp.ok === false ? sp.error : null, body: `
+  const pts = S.history?.points || [], spanH = pts.length > 1 ? (new Date(pts.at(-1).t) - new Date(pts[0].t)) / 3.6e6 : 0;
+  const spendCard = card({title: isNum(allIn) ? `GPU-Kosten ${eur(allIn, 2)} pro Stunde — bei diesem Tempo ≈ ${eur(runRateMonth, 0)} im Monat` : 'GPU-Kosten', sub: 'Live aus dem Kosten-Monitor (nur gelesen) · nur GPU, ohne CPU-Server, Werbung, Gebühren · USD→EUR fix 1,20', as_of: sa, maxAge: 45, error: sp.ok === false ? sp.error : null, body: `
     <div class="stats">
-      <div class="stat"><div class="s-label">Burn jetzt (alles)</div><div class="s-value">${eur(allIn, 2)}<small class="muted">/h</small></div><div class="s-delta muted">davon Kundenbetrieb ${eur(burn, 2)}/h</div></div>
-      <div class="stat"><div class="s-label">Heute bisher</div><div class="s-value">${eur(sp.today_eur, 0)}</div><div class="s-delta muted">≈ ${eur(costDay, 0)} pro vollem Tag</div></div>
-      <div class="stat"><div class="s-label">Monat bisher</div><div class="s-value">${isNum(dv.mtd_tracked_eur) ? eur(dv.mtd_tracked_eur, 0) : '–'}</div><div class="s-delta muted">${dv.tracked_since ? 'erfasst seit ' + new Date(dv.tracked_since).toLocaleDateString(LOC, {day: 'numeric', month: 'numeric', timeZone: 'UTC'}) : 'noch keine Erfassung'}</div></div>
-      <div class="stat"><div class="s-label">Tagesbilanz (Ø 7 T)</div><div class="s-value">${isNum(bal) ? (bal >= 0 ? '+' : '−') + eur(Math.abs(bal), 0) : '–'}</div><div class="s-delta muted">Umsatz ${eur(revDay, 0)} − GPU ${eur(costDay, 0)} pro Tag</div></div>
-      <div class="stat"><div class="s-label">UpCloud-Guthaben</div><div class="s-value">${eur(sp.upcloud_credit_eur, 0)}</div><div class="s-delta ${isNum(runway) && runway < .75 ? 'delta bad' : 'muted'}">${isNum(runway) ? `reicht ${runway < 2 ? nf(0).format(runway * 24) + ' h' : nf(1).format(runway) + ' Tage'} · wird laufend aufgeladen` : 'Reichweite unbekannt'}</div></div>
-      <div class="stat"><div class="s-label">Burn-Verlauf</div>${sparkSVG((S.history?.points || []).map(p => p.burn), '--s2') || '<div class="s-value muted">–</div>'}<div class="s-delta muted">Kundenbetrieb €/h, 8 Tage</div></div>
+      <div class="stat"><div class="s-label">Kosten pro Stunde</div><div class="s-value">${eur(allIn, 2)}</div><div class="s-delta muted">davon Kundenbetrieb ${eur(burn, 2)}, Rest SN92-Prüfer/Forschung</div></div>
+      <div class="stat"><div class="s-label">Heute bisher (UTC)</div><div class="s-value">${eur(sp.today_eur, 0)}</div><div class="s-delta muted">≈ ${eur(costDay, 0)} pro vollem Tag</div></div>
+      <div class="stat"><div class="s-label">Monat bisher</div><div class="s-value">${trackedDays >= 3 ? eur(dv.mtd_tracked_eur, 0) : '–'}</div><div class="s-delta muted">${dv.tracked_since ? `erfasst seit ${new Date(dv.tracked_since).toLocaleDateString(LOC, {day: 'numeric', month: 'numeric', timeZone: 'UTC'})} (${trackedDays} Tag${trackedDays === 1 ? '' : 'e'})${trackedDays < 3 ? ' — Wert ab 3 Tagen' : ''}` : 'noch keine Erfassung'}</div></div>
+      <div class="stat"><div class="s-label">Tagesbilanz</div><div class="s-value">${isNum(bal) ? (bal >= 0 ? '+' : '−') + eur(Math.abs(bal), 0) : '–'}</div><div class="s-delta muted">Verbrauch Ø 7 T ${eur(useDay, 0)} − GPU ${eur(costDay, 0)} pro Tag</div></div>
+      <div class="stat"><div class="s-label">UpCloud-Guthaben</div><div class="s-value">${eur(sp.upcloud_credit_eur, 0)}</div><div class="s-delta ${isNum(runway) && runway < .75 ? 'delta bad' : 'muted'}">${isNum(runway) ? `reicht ${runway < 2 ? nf(0).format(runway * 24) + ' h' : nf(1).format(runway) + ' Tage'} beim jetzigen Verbrauch` : 'Reichweite unbekannt'}</div></div>
+      <div class="stat"><div class="s-label">Kosten-Verlauf</div>${spanH >= 24 ? sparkSVG(pts.map(p => p.burn), '--s2') : '<div class="s-value muted">–</div>'}<div class="s-delta muted">${spanH >= 24 ? `Kundenbetrieb €/h, letzte ${nf(0).format(spanH / 24)} Tage` : 'Verlauf erscheint nach 1 Tag Erfassung'}</div></div>
     </div>
-    ${(sp.by_provider || []).length ? `<details class="more"><summary>Nach Anbieter</summary><div class="tbl-wrap"><table><thead><tr><th>Anbieter</th><th class="r">Knoten</th><th class="r">€/h</th></tr></thead><tbody>${sp.by_provider.map(p => `<tr><td>${esc(p.provider)}</td><td class="r">${num(p.nodes)}</td><td class="r">${eur(p.eur_per_h, 2)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
-    `});
-  const hl = isNum(r.d30) ? `${eur(r.d30, 0)} Umsatz in 30 Tagen${isNum(wizShare) ? ` (${esc(FOCUS)} ${pct(wizShare, 0)})` : ''}${isNum(bal) ? `; pro Tag ${eur(revDay, 0)} Umsatz gegen ${eur(costDay, 0)} GPU-Kosten` : ''}.` : 'Umsatzdaten fehlen.';
+    ${(sp.by_provider || []).length ? `<details class="more"><summary>Nach Anbieter</summary><div class="tbl-wrap"><table><thead><tr><th>Anbieter</th><th class="r">Knoten</th><th class="r">€/h</th></tr></thead><tbody>${sp.by_provider.filter(p => p.eur_per_h > 0 || p.nodes > 0).map(p => `<tr><td>${esc(p.provider)}</td><td class="r">${num(p.nodes)}</td><td class="r">${eur(p.eur_per_h, 2)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`});
+  const hl = isNum(r.d30) ? `${isNum(bal) ? `Pro Tag ${eur(useDay, 0)} Verbrauch gegen ${eur(costDay, 0)} GPU-Kosten. ` : ''}${eur(r.d30, 0)} eingezahlt in 30 Tagen${isNum(focShare) ? `, ${pct(focShare, 0)} von ${FOCUS}` : ''}.` : 'Umsatzdaten fehlen.';
   return `<section class="sec" id="geld"><header><h2>Geld</h2><span class="sec-sum">${esc(hl)}</span></header>
     ${m.error && !d.revenue ? `<p class="err-note">${esc(m.error)}</p>` : ''}
     <div class="grid g12">${revenueCard}${chartCard}</div>
@@ -331,7 +342,7 @@ function renderTraffic() {
   const wk = curve.reduce((a, r) => a + (r[1] || 0), 0), wkPrev = curve.reduce((a, r) => a + (r[2] || 0), 0);
   const curveTitle = wkPrev ? `Letzte 24 h ${wk >= wkPrev ? '+' : '−'}${nf(0).format(Math.abs(wk - wkPrev) / wkPrev * 100)} % gegenüber der Vorwoche` : 'Letzte 24 h gegenüber der Vorwoche';
   const last7 = days.filter(d => !d.partial).slice(-7).reduce((a, d) => a + d.total, 0), prev7 = days.filter(d => !d.partial).slice(-14, -7).reduce((a, d) => a + d.total, 0);
-  const wiz7 = days.filter(d => !d.partial).slice(-7).reduce((a, d) => a + (d.wizville || 0), 0);
+  const wiz7 = days.filter(d => !d.partial).slice(-7).reduce((a, d) => a + (d.focus || 0), 0);
   const dailyTitle = prev7 ? `${compact(last7)} Anfragen in 7 Tagen (${last7 >= prev7 ? '+' : '−'}${nf(0).format(Math.abs(last7 - prev7) / prev7 * 100)} %), ${pct(last7 ? wiz7 / last7 : null, 0)} von ${esc(FOCUS)}` : 'Anfragen pro Tag nach Modell';
   const peak = (t.heatmap_28d || []).reduce((b, c) => c[2] > (b?.[2] || 0) ? c : b, null);
   const mt = t.models_24h || [];
@@ -339,15 +350,15 @@ function renderTraffic() {
   const sig = meta('money').data?.revenue?.signups || {};
   const sigDaily = sig.daily_30d || [];
   mount('ch-sig', n => columns(n, {height: 120, cats: sigDaily.map(r => ({label: dshort(new Date(r[0])), long: new Date(r[0]).toLocaleDateString(LOC, {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'})})), series: [{name: 'Registrierungen', color: '--s1', values: sigDaily.map(r => r[1])}]}));
-  return `<section class="sec" id="kunden"><header><h2>Kunden &amp; Traffic</h2><span class="sec-sum">${isNum(now.requests_24h) ? `${compact(now.requests_24h)} Anfragen in 24 h ${d24 !== null ? `(${d24 >= 0 ? '+' : '−'}${nf(0).format(Math.abs(d24) * 100)} % zum Vortag)` : ''}, ${num(cust.active_accounts)} aktive Konten in 7 Tagen.` : 'Keine Traffic-Daten.'}</span></header>
+  return `<section class="sec" id="kunden"><header><h2>Kunden &amp; Traffic</h2><span class="sec-sum">${isNum(now.requests_24h) ? `${compact(now.requests_24h)} Anfragen in 24 h ${d24 !== null ? `(${d24 >= 0 ? '+' : '−'}${nf(0).format(Math.abs(d24) * 100)} % gegenüber den 24 h davor)` : ''}, ${num(cust.active_accounts)} aktive Konten in 7 Tagen.` : 'Keine Traffic-Daten.'}</span></header>
     ${m.error ? `<p class="err-note">Traffic-Quelle: ${esc(m.error)}</p>` : ''}
     <div class="grid g21">
       ${card({title: esc(dailyTitle), sub: `${days.length < raw.length ? 'Seit Beginn der Log-Aufbewahrung (' + dshort(new Date(days[0].date)) + ')' : '60 Tage'}, nach Modell · Tag in UTC`, as_of: m.as_of, maxAge: 30, body: `${legend(series.map(s => ({name: s.name, color: s.color})))}<div class="chart" id="ch-daily"></div>`})}
       ${card({title: esc(curveTitle), sub: 'Anfragen pro Stunde, Uhrzeit Berlin', as_of: m.as_of, maxAge: 30, body: `${legend([{name: 'Letzte 24 h', color: '--s1', kind: 'line'}, {name: 'Vor 7 Tagen', color: '--muted', kind: 'dash'}])}<div class="chart" id="ch-curve"></div>`})}
     </div>
     <div class="grid g21">
-      ${card({title: mt.length ? `Modelle 24 h — ${esc(modelName(mt[0].model))} trägt ${pct(mt[0].requests / mt.reduce((a, x) => a + x.requests, 0), 0)}` : 'Modelle 24 h', sub: 'Latenz über erfolgreiche Anfragen', as_of: m.as_of, maxAge: 30, body: mt.length ? `<div class="tbl-wrap"><table><thead><tr><th>Modell</th><th class="r">Anfragen</th><th class="r hide-sm">Δ Vortag</th><th class="r">Fehler</th><th class="r hide-sm">p50</th><th class="r">p95</th></tr></thead><tbody>${mt.map(x => `<tr><td><span class="legend"><span><i data-c="${modelColor(x.model)}"></i>${esc(modelName(x.model))}</span></span></td><td class="r">${num(x.requests)}</td><td class="r hide-sm">${delta(x.requests, x.requests_prev_24h)}</td><td class="r">${x.error_rate > .05 ? '⚠ ' : ''}${pct(x.error_rate)}</td><td class="r hide-sm">${ms(x.p50_ms)}</td><td class="r">${ms(x.p95_ms)}</td></tr>`).join('')}</tbody></table></div>` : noData()})}
-      ${card({title: peak ? `Spitze: ${wd[peak[0]]} ${peak[1]}–${peak[1] + 1} Uhr UTC` : 'Wochentag × Stunde', sub: 'Anfragen der letzten 4 Wochen, Uhrzeit UTC, dunkler = mehr', as_of: m.as_of, maxAge: 30, body: `<div class="chart" id="ch-heat"></div>`})}
+      ${card({title: mt.length ? `Modelle 24 h — ${esc(modelName(mt[0].model))} trägt ${pct(mt[0].requests / mt.reduce((a, x) => a + x.requests, 0), 0)}` : 'Modelle 24 h', sub: 'Latenz über erfolgreiche Anfragen', as_of: m.as_of, maxAge: 30, body: mt.length ? `<div class="tbl-wrap"><table><thead><tr><th>Modell</th><th class="r">Anfragen</th><th class="r hide-sm">Δ 24 h davor</th><th class="r">Fehler</th><th class="r hide-sm">p50</th><th class="r">p95</th></tr></thead><tbody>${mt.map(x => `<tr><td><span class="legend"><span><i data-c="${modelColor(x.model)}"></i>${esc(modelName(x.model))}</span></span></td><td class="r">${num(x.requests)}</td><td class="r hide-sm">${delta(x.requests, x.requests_prev_24h, {neutral: !['none', 'unknown'].includes(x.model), upGood: false})}</td><td class="r">${x.error_rate > .05 ? '⚠ ' : ''}${pct(x.error_rate)}</td><td class="r hide-sm">${ms(x.p50_ms)}</td><td class="r">${ms(x.p95_ms)}</td></tr>`).join('')}</tbody></table></div>` : noData()})}
+      ${card({title: peak ? `Meiste Last: ${wd[peak[0]]} ${peak[1]}–${peak[1] + 1} Uhr UTC (Summe 4 Wochen)` : 'Wochentag × Stunde', sub: `Anfragen der letzten 4 Wochen, Uhrzeit UTC, dunkler = mehr · ${FOCUS} prägt das Bild seit 6.11.`, as_of: m.as_of, maxAge: 30, body: `<div class="chart" id="ch-heat"></div>`})}
     </div>
     <div class="grid g2">
       ${card({title: cust.top?.length ? `Aktivste Konten 7 Tage — ${esc(custLabel(cust.top[0].label))} ${pct(cust.top[0].share, 0)}` : 'Aktivste Konten 7 Tage', sub: `${num(cust.active_accounts)} aktive Konten ${delta(cust.active_accounts, cust.active_accounts_prev_7d, {label: 'vs. Vorwoche', abs: true})}`, as_of: m.as_of, maxAge: 30, body: cust.top?.length ? `<div class="bars">${cust.top.map(c => `<div class="bar-row"><span class="bl">${esc(custLabel(c.label))}</span><span class="bv">${compact(c.requests)} · ${pct(c.share, c.share < .01 ? 1 : 0)}</span>${hbar(c.share)}</div>`).join('')}</div>` : noData()})}
@@ -361,7 +372,7 @@ function renderCapacity() {
   const serving = nodes.filter(n => n.state === 'serving').length;
   const stateWord = {serving: 'bedient', idle: 'leer', starting: 'startet', draining: 'fährt runter', down: 'aus'};
   const stateLvl = {serving: 'ok', idle: 'warn', starting: 'warn', draining: 'warn', down: 'crit'};
-  const kindWord = {base: 'Basis', burst: 'Burst', rental: 'Miete'};
+  const kindWord = {base: 'fest', burst: 'Zusatz (Burst)', rental: 'gemietet'};
   const maxReq = Math.max(1, ...nodes.map(n => n.req_15m || 0));
   const hl = nodes.length ? `${serving} von ${nodes.length} Knoten bedienen Anfragen; ${num(sat.capacity_rejections_1h)} Kapazitäts-Ablehnungen in der letzten Stunde.` : 'Keine Flottendaten.';
   return `<section class="sec" id="kapazitaet"><header><h2>Kapazität</h2><span class="sec-sum">${esc(hl)}</span></header>
@@ -375,11 +386,11 @@ function renderCapacity() {
       ${card({title: 'Sättigung', sub: 'Gateway, Attester und Warteschlange', as_of: m.as_of, maxAge: 30, body: `
         <dl class="kv">
           <dt>Gateway</dt><dd>${c.gateway ? `<span class="pill ${c.gateway.ok ? 'ok' : 'crit'}"><span class="dot ${c.gateway.ok ? 'ok' : 'crit'}"></span>${c.gateway.ok ? 'online' : 'gestört'}</span>` : '–'}</dd>
-          <dt>Attester</dt><dd>${isNum(c.attesters?.total) ? `${c.attesters.up} / ${c.attesters.total} aktiv` : '–'}</dd>
+          <dt>Attester (Prüfknoten)</dt><dd>${isNum(c.attesters?.total) ? `${num(c.attesters.up)} / ${num(c.attesters.total)} aktiv` : '–'}</dd>
           <dt>Kapazitäts-Ablehnungen 1 h</dt><dd>${num(sat.capacity_rejections_1h)}</dd>
           <dt>Wartezeit p95 1 h</dt><dd>${ms(sat.queue_wait_p95_ms_1h)}</dd>
           <dt>Burst-Knoten aktiv</dt><dd>${num(c.burst?.active)}</dd>
-          <dt>Freie Angebote am Markt</dt><dd>${isNum(c.market?.available_offers) ? `${c.market.available_offers} von ${c.market.checked}` : '–'}</dd>
+          <dt>Freie Angebote am Markt</dt><dd>${isNum(c.market?.available_offers) ? `${num(c.market.available_offers)} von ${num(c.market.checked)}${isNum(c.market.unknown) ? ` · ${num(c.market.unknown)} unbekannt` : ''}` : '–'}</dd>
         </dl>
         <p class="sub">Attester gilt als aktiv, wenn er in den letzten 3 Minuten bestätigt hat. Marktangebote = freie GPU-Angebote je Modell/Region/GPU-Typ.</p>`})}
     </div>
@@ -394,14 +405,14 @@ function renderSN92() {
   const hl = best ? `Bestes Ergebnis: ${best.model} auf Platz ${best.rank} von ${best.of} im ${best.index}.` : 'Keine Ranking-Daten.';
   const subRows = [];
   if (sub.validator) subRows.push(['Validator', `Block ${num(sub.validator.block)} · v${sub.validator.version || '?'}`]);
-  if (sub.weights) subRows.push(['Gewicht Owner-UID ' + (sub.weights.owner_uid ?? '?'), pct(sub.weights.owner_weight, 1)], ['Gewicht Anker-UID ' + (sub.weights.anchor_uid ?? '?'), pct(sub.weights.anchor_weight, 2)]);
-  (sub.engine_tracks?.list || []).forEach(t => subRows.push([`Engine-Track ${t.track}`, `Champion UID ${t.champion_uid ?? '–'}${t.challenger_uid != null ? ' · Herausforderer ' + t.challenger_uid : ''}`]));
-  (sub.miner_tracks?.list || []).forEach(t => { subRows.push([`Miner-Track ${t.track}`, `Champion UID ${t.champion_uid ?? '–'}${t.since ? ' seit ' + new Date(t.since).toLocaleDateString(LOC, {day: 'numeric', month: 'short'}) : ''}`]); const b = t.miners_by_status || {}; subRows.push(['Einreichungen', `${num(Object.values(b).reduce((a, x) => a + x, 0))} gesamt · ${num(b.pending_confirm || 0)} in Prüfung · Warteschlange ${num(t.queue_len)}`]); });
+  if (sub.weights) subRows.push(['Gewicht Subnetz-Owner (UID ' + (sub.weights.owner_uid ?? '?') + ')', pct(sub.weights.owner_weight, 1)], ['Gewicht Referenzmodell (UID ' + (sub.weights.anchor_uid ?? '?') + ')', pct(sub.weights.anchor_weight, 2)]);
+  (sub.engine_tracks?.list || []).forEach(t => subRows.push([`Engine-Track ${t.track}`, `Spitzenreiter UID ${t.champion_uid ?? '–'}${t.challenger_uid != null ? ' · Herausforderer ' + t.challenger_uid : ''}`]));
+  (sub.miner_tracks?.list || []).forEach(t => { subRows.push([`Miner-Track ${t.track}${sub.miner_tracks?.partial ? ' (Stand unvollständig)' : ''}`, `Spitzenreiter UID ${t.champion_uid ?? '–'}${t.since ? ' seit ' + new Date(t.since).toLocaleDateString(LOC, {day: 'numeric', month: 'short'}) : ''}`]); const b = t.miners_by_status || {}; subRows.push(['Einreichungen', `${num(Object.values(b).reduce((a, x) => a + x, 0))} gesamt · ${num(b.pending_confirm || 0)} in Prüfung · Warteschlange ${num(t.queue_len)}`]); });
   subRows.push(['Emissionen', sub.emissions?.ok === false ? 'kein aktueller Stand' : '–']);
   return `<section class="sec" id="sn92"><header><h2>SN92 &amp; Modelle</h2><span class="sec-sum">${esc(hl)}</span></header>
     <div class="grid g21">
-      ${card({title: 'Unsere Modelle in den Rankings', sub: 'HF Decision Index und AA DI v2 · Platz = Rang unter allen gelisteten Modellen', as_of: m.as_of, maxAge: 60 * 36, error: m.error, body: rk.length ? `<ul class="rl">${rk.slice().sort((a, b) => (a.index < b.index ? 1 : a.index > b.index ? -1 : 0) || (a.rank ?? 999) - (b.rank ?? 999)).map(x => `<li><span class="t"><span>${esc(x.model)}</span></span><span class="v">${isNum(x.rank) ? `<span class="rank">${num(x.rank)}</span> <span class="muted">/ ${num(x.of)}</span>` : '<span class="muted">nicht gelistet</span>'}</span><span class="m">${esc(x.index)} · Score ${isNum(x.score) ? num(x.score, 1) : '–'} · Spitze ${esc(x.leader || '–')} · ${x.as_of ? ago(x.as_of) : ''}</span><span class="vm">${isNum(x.previous_rank) && isNum(x.rank) ? delta(-x.rank, -x.previous_rank, {abs: true, label: 'Plätze'}) : ''}</span></li>`).join('')}</ul>` : noData()})}
-      ${card({title: 'Subnetz 92', sub: 'Champion, Miner und Emissionen (Zahlen ohne Bewertung)', as_of: sub.as_of || m.as_of, maxAge: 60 * 36, body: subRows.length ? `<dl class="kv">${subRows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl><p class="sub">Gewichte = Anteil im Gewichtsvektor unseres Validators, keine ausgezahlten Emissionen.</p>` : noData()})}
+      ${card({title: 'Unsere Modelle in den Rankings', sub: 'HF Decision Index und AA DI v2 · Platz = Rang unter allen gelisteten Modellen · Stand je Zeile', as_of: rk.filter(x => x.as_of).map(x => x.as_of).sort()[0] || m.as_of, maxAge: 60 * 24 * 8, error: m.error, body: rk.length ? `<ul class="rl">${rk.slice().sort((a, b) => (a.index < b.index ? 1 : a.index > b.index ? -1 : 0) || (a.rank ?? 999) - (b.rank ?? 999)).map(x => `<li><span class="t"><span>${esc(x.model)}</span></span><span class="v">${isNum(x.rank) ? `<span class="rank">${num(x.rank)}</span> <span class="muted">/ ${num(x.of)}</span>` : `<span class="muted">${x.index.startsWith('AA') ? 'nicht im AA-Abzug' : 'nicht gelistet'}</span>`}</span><span class="m">${esc(x.index)} · Score ${isNum(x.score) ? num(x.score, 1) : '–'} · Spitze ${esc(x.leader || '–')} · ${x.as_of ? ago(x.as_of) : ''}</span><span class="vm">${isNum(x.previous_rank) && isNum(x.rank) ? delta(-x.rank, -x.previous_rank, {abs: true, label: 'Plätze seit ' + (x.previous_as_of ? dshort(new Date(x.previous_as_of)) : 'davor')}) : ''}</span></li>`).join('')}</ul>` : noData()})}
+      ${card({title: 'Subnetz 92', sub: 'Spitzenreiter, Einreichungen und Gewichte (Zahlen ohne Bewertung)', as_of: [sub.validator?.as_of, sub.engine_tracks?.as_of, sub.miner_tracks?.as_of].filter(Boolean).sort()[0] || sub.as_of || m.as_of, maxAge: 60 * 36, body: subRows.length ? `<dl class="kv">${subRows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl><p class="sub">Gewichte = Anteil im Gewichtsvektor unseres Validators, keine ausgezahlten Emissionen.</p>` : noData()})}
     </div></section>`;
 }
 
@@ -420,7 +431,7 @@ function renderOps() {
     <div class="grid g3">
       ${card({title: `Dringend 7 Tage: ${num(u.forwarded)} weitergeleitet`, sub: `${num(u.absorbed)} vom Dringend-Filter abgefangen`, as_of: u.as_of || m.as_of, maxAge: 180, body: ud.length ? `${legend([{name: 'An dich', color: '--s1'}, {name: 'Abgefangen', color: '--s-other'}])}<div class="chart" id="ch-urg"></div>` : noData()})}
       ${card({title: 'Server-Speicher', sub: 'Belegung der Systemplatte', as_of: disk[0]?.as_of || m.as_of, maxAge: 45, body: disk.length ? `<div class="bars">${disk.map(d => `<div class="meter-row"><span>${d.used_pct >= 85 ? '⚠ ' : ''}${esc(d.server)}</span><span class="num muted">${nf(0).format(d.used_pct)} % · ${num(d.free_gb)} GB frei</span>${meterSVG(d.used_pct / 100, .85, .92)}</div>`).join('')}</div>` : noData()})}
-      ${card({title: 'Kontingente der Agenten', sub: 'Verbrauch; Strich = Soll-Tempo bis zum Reset (darunter = im Plan)', as_of: m.as_of, maxAge: 45, body: quota.length ? `<div class="bars">${quota.map(q => `<div class="meter-row"><span>${esc(q.engine)}</span><span class="num muted">${pct(q.used_pct / 100, 0)}${isNum(q.pace_pct) ? ` · Soll ${pct(q.pace_pct / 100, 0)}` : ''}</span>${meterSVG(q.used_pct / 100, .8, .95, isNum(q.pace_pct) ? q.pace_pct / 100 : undefined)}</div>`).join('')}</div>` : noData()})}
+      ${card({title: 'Kontingente der Agenten', sub: 'Verbrauch; Strich = Soll-Tempo bis zum Reset (darunter = im Plan)', as_of: quota.map(q => q.as_of).filter(Boolean).sort()[0] || m.as_of, maxAge: 45, body: quota.length ? `<div class="bars">${quota.map(q => `<div class="meter-row"><span>${esc(q.engine)}</span><span class="num muted">${pct(q.used_pct / 100, 0)}${isNum(q.pace_pct) ? ` · Soll ${pct(q.pace_pct / 100, 0)}` : ''}</span>${meterSVG(q.used_pct / 100, .8, .95, isNum(q.pace_pct) ? q.pace_pct / 100 : undefined)}</div>`).join('')}</div>` : noData()})}
     </div>
     <div class="grid g2">
       ${card({title: `${num(jobs.running)} Agenten-Jobs laufen`, sub: 'Jobs mit aktivem Prozess', as_of: jobs.as_of || m.as_of, maxAge: 45, body: (jobs.list || []).length ? `<div class="tbl-wrap"><table><thead><tr><th>Job</th><th>Engine</th><th class="r">seit</th></tr></thead><tbody>${jobs.list.slice(0, 8).map(j => `<tr><td>${esc(j.name)}</td><td>${esc(j.engine || '')}</td><td class="r">${j.started ? ago(j.started).replace('vor ', '') : '–'}</td></tr>`).join('')}</tbody></table></div>${jobs.list.length > 8 ? `<details class="more"><summary>Alle ${jobs.list.length} anzeigen</summary><div class="tbl-wrap"><table><tbody>${jobs.list.slice(8).map(j => `<tr><td>${esc(j.name)}</td><td>${esc(j.engine || '')}</td><td class="r">${j.started ? ago(j.started).replace('vor ', '') : '–'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}` : noData('Keine laufenden Jobs gefunden.')})}
@@ -440,7 +451,7 @@ function render() {
   $('#stand').textContent = a ? `Stand ${hhmm(a)} Uhr · ${ago(S.as_of)}` : 'Kein Stand';
   // status dot on chips
   const lvl = {}; (S.status?.sections ? Object.entries(S.status.sections) : []).forEach(([k, v]) => lvl[k] = v);
-  document.querySelectorAll('.chips a').forEach(a => { const k = {'#geld': 'money', '#kunden': 'traffic', '#kapazitaet': 'capacity', '#sn92': 'sn92', '#betrieb': 'ops'}[a.getAttribute('href')]; a.querySelector('.dot')?.remove(); if (k && lvl[k] && lvl[k] !== 'ok') a.insertAdjacentHTML('afterbegin', `<span class="dot ${lvl[k]}" aria-label="${lvl[k] === 'crit' ? 'Kritisch' : 'Achtung'}"></span>`); });
+  document.querySelectorAll('.chips a').forEach(a => { const k = {'#geld': 'money', '#kunden': 'traffic', '#kapazitaet': 'capacity', '#sn92': 'sn92', '#betrieb': 'ops'}[a.getAttribute('href')]; a.querySelector('.dot')?.remove(); if (k && lvl[k] && lvl[k] !== 'ok') a.insertAdjacentHTML('afterbegin', `<span class="dot ${lv(lvl[k])}" aria-label="${lvl[k] === 'crit' ? 'Kritisch' : 'Achtung'}"></span>`); });
 }
 async function load() {
   try {

@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 PASSWORD=os.environ.get('DASH_PASSWORD','');SALT=os.environ.get('DASH_SESSION_SALT','');TOKEN=os.environ.get('DASH_PUSH_TOKEN','')
 if not all((PASSWORD,SALT,TOKEN)):raise SystemExit('DASH_PASSWORD, DASH_SESSION_SALT und DASH_PUSH_TOKEN müssen gesetzt sein.')
-KEY=hashlib.sha256((PASSWORD+'\0'+SALT).encode()).digest();AGE=14*86400
+KEY=hashlib.scrypt(PASSWORD.encode(),salt=('dm-overview-session\0'+SALT).encode(),n=2**14,r=8,p=1,dklen=32);AGE=14*86400
 STATIC=Path(__file__).parent/'static';LOCK=threading.RLock();FAILURES={};SNAPSHOT={}
 MAX_BODY=8*1024*1024
 DATA=Path(os.environ.get('DASH_DATA_DIR','/data'))
@@ -33,12 +33,12 @@ def valid_session(value):
   expiry=int(base64.urlsafe_b64decode(body+'='*(-len(body)%4)).decode().split(':')[0]);return time.time()<expiry<=time.time()+AGE+60
  except (ValueError,UnicodeError):return False
 class Handler(BaseHTTPRequestHandler):
- server_version='Overview'
+ server_version='Overview';sys_version='';timeout=15
  def log_message(self,fmt,*args):pass # Never log credentials, headers or snapshot content.
  def send(self,status,body=b'',ctype='text/plain; charset=utf-8',headers=None):
   if isinstance(body,str):body=body.encode()
   self.send_response(status)
-  for k,v in {'Content-Type':ctype,'Content-Length':str(len(body)),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'",**(headers or {})}.items():self.send_header(k,v)
+  for k,v in {'Content-Type':ctype,'Content-Length':str(len(body)),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY','Strict-Transport-Security':'max-age=31536000','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'",**(headers or {})}.items():self.send_header(k,v)
   self.end_headers();self.wfile.write(body)
  def authorized(self):
   try:
@@ -72,18 +72,22 @@ class Handler(BaseHTTPRequestHandler):
    if path=='/login':
     if not self.same_origin():return self.send(403,'Ursprung nicht erlaubt.')
     # Peer IP only: never trust a client-supplied X-Forwarded-For header.
+    # Behind the proxy every peer is the proxy, so the limiter is effectively global. A correct password therefore
+    # always succeeds (no lockout DoS); only wrong guesses are limited (5 per 10 min) and slowed down.
+    body=parse_qs(self.read_body(4096).decode());guess=body.get('dm-overview-access-code',[''])[0]
+    ok=hmac.compare_digest(guess.encode(),PASSWORD.encode())
     ip=self.client_address[0];now=time.monotonic()
     with LOCK:
      for old in list(FAILURES):
       if not FAILURES[old] or FAILURES[old][-1]<=now-600:del FAILURES[old]
      attempts=FAILURES.setdefault(ip,deque())
      while attempts and attempts[0]<=now-600:attempts.popleft()
-     if len(attempts)>=5:return self.send(429,'Zu viele Versuche. Bitte später erneut versuchen.',headers={'Retry-After':'600'})
-     body=parse_qs(self.read_body(4096).decode());guess=body.get('dm-overview-access-code',[''])[0]
-     if not hmac.compare_digest(guess.encode(),PASSWORD.encode()):
-      attempts.append(now)
-      return self.send(429 if len(attempts)>=5 else 401,'Zugangscode ungültig.' if len(attempts)<5 else 'Zu viele Versuche. Bitte später erneut versuchen.',headers={'Retry-After':'600'} if len(attempts)>=5 else {})
-     FAILURES.pop(ip,None)
+     if not ok:attempts.append(now)
+     n=len(attempts)
+    if not ok:
+     time.sleep(min(2.0,0.25*n))
+     if n>5:return self.send(429,'Zu viele Versuche. Bitte später erneut versuchen.',headers={'Retry-After':'600'})
+     return self.send(401,'Zugangscode ungültig.')
     return self.send(303,headers={'Location':'/','Set-Cookie':f'dm_session={signed_session()}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={AGE}'})
    if path=='/logout':
     if not self.same_origin():return self.send(403,'Ursprung nicht erlaubt.')
@@ -96,6 +100,7 @@ class Handler(BaseHTTPRequestHandler):
     global SNAPSHOT
     body=json.dumps(value,ensure_ascii=False,allow_nan=False)
     with LOCK:
+     if isinstance(SNAPSHOT.get('as_of'),str) and value['as_of']<SNAPSHOT['as_of']:return self.send(409,'Älterer Stand abgelehnt.')
      # Atomic private persistence; keep the old snapshot if the write fails.
      fd,name=tempfile.mkstemp(dir=DATA,prefix='.snapshot-')
      try:
@@ -105,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
       if os.path.exists(name):os.unlink(name)
     return self.send(200,'ok')
    self.send(404,'Nicht gefunden.')
-  except (ValueError,UnicodeError):self.send(400,'Ungültige Anfrage.')
+  except (ValueError,UnicodeError,RecursionError):self.send(400,'Ungültige Anfrage.')
   except (OSError,TimeoutError):self.send(503,'Speichern oder Lesen derzeit nicht möglich.')
 if __name__=='__main__':
  server=ThreadingHTTPServer((os.environ.get('DASH_BIND','0.0.0.0'),int(os.environ.get('PORT','8080'))),Handler);server.daemon_threads=True;server.serve_forever()
