@@ -248,7 +248,7 @@ function renderHero() {
     <div class="kpis">
       ${kpi('Anfragen / min (5 min)', num(t.req_per_min_5m, t.req_per_min_5m < 10 ? 1 : 0), `Ø 1 h: ${num(t.req_per_min_1h, 0)} · ${tr.stale ? '⚠ veraltet' : ago(tr.as_of)}`, sparkSVG(rpmSpark), '#kunden')}
       ${kpi('Plattform-Fehler 1 h', pct(pe?.platform_rate_1h), pe ? `+ Kundenfehler ${pct(pe.customer_rate_1h)} · alle 24 h ${pct(t.error_rate_24h)}` : `alle 24 h: ${pct(t.error_rate_24h)}`, '', '#kunden', pe?.platform_rate_1h > .05)}
-      ${kpi('Antwortzeit', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, `p50/p95 1 h · 24 h p95 ${ms(t.p95_ms_24h)}`, '', '#kunden', t.p95_ms_1h > 2 * t.p95_ms_24h && t.p95_ms_1h > 3000)}
+      ${kpi('Antwortzeit', `${ms(t.p50_ms_1h)} <small>/ ${ms(t.p95_ms_1h)}</small>`, `p50/p95 1 h · 24 h p95 ${ms(t.p95_ms_24h)}`, '', '#kunden', st.latency?.level === 'warn' ? 'warn' : false)}
       ${kpi('API · Prüfknoten', `${gwOk === true ? '<span class="dot ok"></span> online' : gwOk === false ? '<span class="dot crit"></span> gestört' : '–'}`, isNum(att.total) ? `Prüfknoten ${num(att.up)}/${num(att.total)} aktiv` : 'Attester: kein Stand', '', '#kapazitaet', gwOk === false)}
       ${kpi('Verbrauch heute (UTC)', eur(mon.revenue?.usage_value?.today), `7 T ${eur(mon.revenue?.usage_value?.d7, 0)} · Einzahlungen heute ${eur(mon.revenue?.today, 0)}`, sparkSVG((mon.revenue?.usage_value?.daily_30d || []).slice(-15, -1).map(d => d[1]), '--s1'), '#geld')}
       ${kpi('Braucht dich', needsN ? `${needsN} offen` : 'Nichts offen', expN ? `${expN} abgelaufen, unbeantwortet` : 'nur beantwortbare Karten', '', '#dich', needsN > 0 ? 'warn' : false)}
