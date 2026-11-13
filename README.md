@@ -11,3 +11,8 @@ Private operations cockpit (code only — no data, no customer information lives
   (schema `cockpit/2`) including its own history.
 
 Env: `DASH_PASSWORD`, `DASH_SESSION_SALT`, `DASH_PUSH_TOKEN` (required), `DASH_DATA_DIR` (default `/data`, falls back to tmp).
+
+Card ages describe successful source reads (cached producers retain their own read timestamps).
+The private collector keeps model ownership in a single explicit config, diagnoses latency per
+model/account, and sends filesystem paths and sizes for the server storage card. A quiet event
+stream is fresh after a successful read; event times remain separate metadata.
