@@ -218,7 +218,7 @@ function heatmap(node, cells) {
 
 /* ---------- model colours: fixed by entity, never by rank ---------- */
 const MODEL_ORDER = ['s1-pro', 's1-fast', 's1-vision', 'mammoth-1', 's1-mini', 's1-max'];
-const modelName = m => ({none: '(ohne Modell)', other: 'Sonstige', unknown: '(unbekannt)'})[m] || m;
+const modelName = m => ({none: '(ohne Modell)', overloaded: '(abgewiesen: Überlast)', other: 'Sonstige', unknown: '(unbekannt)'})[m] || m;
 const shortNode = n => String(n || '').replace(/^upcloud-fihel2-/, '').replace(/^gpuserverhub-eupl-/, 'kat·').replace(/^euburst-([0-9a-f]{8})[0-9a-f-]*-(\w+)$/, 'burst-$1 ($2)');
 const custLabel = l => String(l || '').replace(/^acct /, 'Konto ');
 function modelColor(m) { const i = MODEL_ORDER.indexOf(m); return i >= 0 && i < 6 ? ['--s1', '--s2', '--s3', '--s7', '--s5', '--s6'][i] : '--s-other'; }
@@ -358,7 +358,7 @@ function renderTraffic() {
       ${card({title: esc(curveTitle), sub: 'Anfragen pro Stunde, Uhrzeit Berlin', as_of: m.as_of, maxAge: 30, body: `${legend([{name: 'Letzte 24 h', color: '--s1', kind: 'line'}, {name: 'Vor 7 Tagen', color: '--muted', kind: 'dash'}])}<div class="chart" id="ch-curve"></div>`})}
     </div>
     <div class="grid g21">
-      ${card({title: mt.length ? `Modelle 24 h — ${esc(modelName(mt[0].model))} trägt ${pct(mt[0].requests / mt.reduce((a, x) => a + x.requests, 0), 0)}` : 'Modelle 24 h', sub: 'Latenz über erfolgreiche Anfragen', as_of: m.as_of, maxAge: 30, body: mt.length ? `<div class="tbl-wrap"><table><thead><tr><th>Modell</th><th class="r">Anfragen</th><th class="r hide-sm">Δ 24 h davor</th><th class="r">Fehler</th><th class="r hide-sm">p50</th><th class="r">p95</th></tr></thead><tbody>${mt.map(x => `<tr><td><span class="legend"><span><i data-c="${modelColor(x.model)}"></i>${esc(modelName(x.model))}</span></span></td><td class="r">${num(x.requests)}</td><td class="r hide-sm">${delta(x.requests, x.requests_prev_24h, {neutral: !['none', 'unknown'].includes(x.model), upGood: false})}</td><td class="r">${x.error_rate > .05 ? '⚠ ' : ''}${pct(x.error_rate)}</td><td class="r hide-sm">${ms(x.p50_ms)}</td><td class="r">${ms(x.p95_ms)}</td></tr>`).join('')}</tbody></table></div>` : noData()})}
+      ${card({title: mt.length ? `Modelle 24 h — ${esc(modelName(mt[0].model))} trägt ${pct(mt[0].requests / mt.reduce((a, x) => a + x.requests, 0), 0)}` : 'Modelle 24 h', sub: 'Latenz über erfolgreiche Anfragen', as_of: m.as_of, maxAge: 30, body: mt.length ? `<div class="tbl-wrap"><table><thead><tr><th>Modell</th><th class="r">Anfragen</th><th class="r hide-sm">Δ 24 h davor</th><th class="r">Fehler</th><th class="r hide-sm">p50</th><th class="r">p95</th></tr></thead><tbody>${mt.map(x => `<tr><td><span class="legend"><span><i data-c="${modelColor(x.model)}"></i>${esc(modelName(x.model))}</span></span></td><td class="r">${num(x.requests)}</td><td class="r hide-sm">${delta(x.requests, x.requests_prev_24h, {neutral: !['none', 'unknown', 'overloaded'].includes(x.model), upGood: false})}</td><td class="r">${x.error_rate > .05 ? '⚠ ' : ''}${pct(x.error_rate)}</td><td class="r hide-sm">${ms(x.p50_ms)}</td><td class="r">${ms(x.p95_ms)}</td></tr>`).join('')}</tbody></table></div>` : noData()})}
       ${card({title: peak ? `Meiste Last: ${wd[peak[0]]} ${peak[1]}–${peak[1] + 1} Uhr UTC (Summe 4 Wochen)` : 'Wochentag × Stunde', sub: `Anfragen der letzten 4 Wochen, Uhrzeit UTC, kräftigere Farbe = mehr · ${FOCUS} prägt das Bild seit 6.11.`, as_of: m.as_of, maxAge: 30, body: `<div class="chart" id="ch-heat"></div>`})}
     </div>
     <div class="grid g2">
