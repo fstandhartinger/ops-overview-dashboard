@@ -458,7 +458,7 @@ function loadChart(node, row, end) {
 function renderLoad(block) {
   const rows = ['sandy', 'lechonk'].map(host => arr(block?.hosts).find(r => r.host === host) || {host, server: host === 'sandy' ? 'Sandy' : 'LeChonk'});
   const body = rows.map(row => {
-    const fresh = row.ok === true && row.as_of && Date.now() - new Date(row.as_of) <= 600000;
+    const fresh = row.ok === true && row.as_of && Date.now() - new Date(row.as_of) <= 1200000;  // collector cadence is 15 min
     if (!fresh || ![row.load1, row.load5, row.threads, row.soft_load, row.hard_load].every(isNum)) {
       return `<div class="load-row"><div><strong>${esc(row.server)}</strong><p class="sub">Last nicht verfügbar${row.as_of ? ' · letzter Stand ' + esc(ago(row.as_of)) : ''}</p></div><p class="muted">Keine aktuelle Messung (höchstens 10 Min. alt erforderlich).</p></div>`;
     }

@@ -21,6 +21,6 @@ The Serverlast card reads `sections.ops.data.load`: `hosts` contains Sandy and L
 with `ok`, `server`, `host`, `as_of`, `age_s`, `load1`, `load5`, `threads`, `soft_load`,
 `hard_load`, `verdict` (`ok`/`soft`/`hard`/`unavailable`) and `history` buckets
 (`t` as UTC epoch seconds, `mean_load1`, `max_load1`). `window_end` anchors the 24-hour
-chart. A missing host, failed read or sample older than ten minutes displays unavailable.
+chart. A missing host, failed read or snapshot older than twenty minutes (collector runs every 15 min) displays unavailable.
 The chart preserves missing history buckets as gaps; dashed labelled lines show the
 soft and hard limits. Source samples and fixture snapshots stay outside this repository.
