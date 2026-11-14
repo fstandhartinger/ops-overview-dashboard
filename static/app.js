@@ -417,6 +417,60 @@ function renderSN92() {
     </div></section>`;
 }
 
+function loadChart(node, row, end) {
+  const start = end - 86400000;
+  const pts = arr(row.history).filter(p => isNum(p.t) && isNum(p.mean_load1) && isNum(p.max_load1) && p.t * 1000 >= start - 600000 && p.t * 1000 <= end);
+  const W = node.clientWidth || 320, H = 126, L = 28, R = W - 78, T = 12, B = 104;
+  const ymax = niceMax(Math.max(row.hard_load * 1.2, ...pts.map(p => p.max_load1)));
+  const X = t => Math.max(L, Math.min(R, L + (t - start) / 86400000 * (R - L)));
+  const Y = v => B - v / ymax * (B - T);
+  const svg = el('svg', {viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': `${row.server}: letzte 24 Stunden, Mittelwert und Maximum je 10 Minuten. Weiche Grenze ${num(row.soft_load, 1)}, harte Grenze ${num(row.hard_load, 1)}.`}, node);
+  el('line', {x1: L, x2: R, y1: B, y2: B, class: 'base-l'}, svg);
+  const zero = el('text', {x: L - 6, y: B + 3, 'text-anchor': 'end'}, svg); zero.textContent = '0';
+  // Preserve missing buckets as gaps, rather than invented zeroes.
+  const segments = [];
+  pts.forEach(p => {
+    if (!segments.length || p.t - segments.at(-1).at(-1).t > 600) segments.push([]);
+    segments.at(-1).push(p);
+  });
+  for (const segment of segments) {
+    const path = key => segment.map((p, i) => `${i ? 'L' : 'M'}${X(p.t * 1000)},${Y(p[key])}`).join('');
+    el('path', {d: path('max_load1') + `L${X(Math.min(end, (segment.at(-1).t + 600) * 1000))},${Y(segment.at(-1).max_load1)}V${B}H${X(segment[0].t * 1000)}Z`, fill: 'var(--s1)', 'fill-opacity': '.12'}, svg);
+    el('path', {d: path('mean_load1'), fill: 'none', stroke: 'var(--s1)', 'stroke-width': 2, 'stroke-linejoin': 'round'}, svg);
+    segment.forEach(p => {
+      const dot = el('circle', {cx: X(p.t * 1000), cy: Y(p.mean_load1), r: 2, fill: 'var(--s1)'}, svg);
+      el('title', {}, dot).textContent = `${hhmm(new Date(p.t * 1000))} · Ø ${num(p.mean_load1, 1)} · Max. ${num(p.max_load1, 1)}`;
+    });
+  }
+  const labelY = {soft_load: Math.min(B - 2, Y(row.soft_load) + 4)};
+  labelY.hard_load = Math.min(Y(row.hard_load) + 4, labelY.soft_load - 14);
+  [['soft_load', 'weich', '--warn-ink'], ['hard_load', 'hart', '--bad-ink']].forEach(([key, name, color]) => {
+    const y = Y(row[key]);
+    el('line', {x1: L, x2: R, y1: y, y2: y, stroke: `var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '5 4'}, svg);
+    el('line', {x1: R, x2: R + 4, y1: y, y2: labelY[key] - 4, stroke: `var(${color})`}, svg);
+    const label = el('text', {x: R + 6, y: labelY[key], class: `load-${key}`}, svg); label.textContent = `${name} ${num(row[key], 1)}`;
+  });
+  [[L, 'vor 24 h', 'start'], [R, 'jetzt', 'end']].forEach(([x, text, anchor]) => {
+    const label = el('text', {x, y: H - 4, 'text-anchor': anchor}, svg); label.textContent = text;
+  });
+}
+
+function renderLoad(block) {
+  const rows = ['sandy', 'lechonk'].map(host => arr(block?.hosts).find(r => r.host === host) || {host, server: host === 'sandy' ? 'Sandy' : 'LeChonk'});
+  const body = rows.map(row => {
+    const fresh = row.ok === true && row.as_of && Date.now() - new Date(row.as_of) <= 600000;
+    if (!fresh || ![row.load1, row.load5, row.threads, row.soft_load, row.hard_load].every(isNum)) {
+      return `<div class="load-row"><div><strong>${esc(row.server)}</strong><p class="sub">Last nicht verfügbar${row.as_of ? ' · letzter Stand ' + esc(ago(row.as_of)) : ''}</p></div><p class="muted">Keine aktuelle Messung (höchstens 10 Min. alt erforderlich).</p></div>`;
+    }
+    const verdict = ({ok: ['ok', 'unter der weichen Grenze'], soft: ['warn', 'weiche Grenze erreicht'], hard: ['crit', 'harte Grenze erreicht']})[row.verdict] || ['off', 'Bewertung unbekannt'];
+    const id = `ch-load-${row.host}`;
+    const end = Date.parse(block.window_end) || Date.now();
+    mount(id, n => loadChart(n, row, end));
+    return `<div class="load-row"><div><div class="load-heading"><strong>${esc(row.server)}</strong><span class="age">${esc(ago(row.as_of).replace(' min', ' Min.'))}</span></div><p class="load-value ${verdict[0]}">1-min-Last <b class="num">${num(row.load1, 1)}</b> von ${num(row.threads)} Threads</p><p class="sub">5-min-Last ${num(row.load5, 1)} · <span class="pill ${verdict[0]}">${verdict[1]}</span></p></div><div><div class="chart load-chart" id="${id}"></div>${arr(row.history).length ? '' : '<p class="sub">Noch kein Verlauf verfügbar.</p>'}</div></div>`;
+  }).join('');
+  return card({title: 'Serverlast', sub: 'Letzte 24 h · Linie: Mittelwert · Fläche: Maximum je 10 Min. · Lücken: keine Messung', as_of: block?.as_of, maxAge: 10, id: 'serverlast', body});
+}
+
 function renderOps() {
   const m = meta('ops'), o = m.data || {};
   const q0 = o.quota || [], quota = q0.some(q => /^claude-/.test(q.engine)) ? q0.filter(q => q.engine !== 'claude') : q0;
@@ -434,6 +488,7 @@ function renderOps() {
       ${card({title: 'Server-Speicher', sub: 'Systemplatten und LeChonk /home', as_of: disk.map(d => d.as_of).filter(Boolean).sort()[0] || m.as_of, maxAge: 45, body: disk.length ? `<div class="bars">${disk.map(d => `<div class="meter-row"><span>${d.used_pct >= 85 ? '⚠ ' : ''}${esc(d.server)} ${esc(d.path || "/")}</span><span class="num muted">${nf(0).format(d.used_pct)} % · ${num(d.free_gb)} GB frei${isNum(d.total_gb) ? ` / ${d.total_gb >= 1000 ? num(d.total_gb / 1000, 1) + " TB" : num(d.total_gb) + " GB"}` : ""}</span>${meterSVG(d.used_pct / 100, .85, .92)}</div>`).join('')}</div>` : noData()})}
       ${card({title: 'Kontingente der Agenten', sub: 'Verbrauch; Strich = Soll-Tempo bis zum Reset (darunter = im Plan)', as_of: quota.map(q => q.as_of).filter(Boolean).sort()[0] || m.as_of, maxAge: 45, body: quota.length ? `<div class="bars">${quota.map(q => `<div class="meter-row"><span>${esc(q.engine)}</span><span class="num muted">${pct(q.used_pct / 100, 0)}${isNum(q.pace_pct) ? ` · Soll ${pct(q.pace_pct / 100, 0)}` : ''}</span>${meterSVG(q.used_pct / 100, .8, .95, isNum(q.pace_pct) ? q.pace_pct / 100 : undefined)}</div>`).join('')}</div>` : noData()})}
     </div>
+    ${renderLoad(o.load)}
     <div class="grid g2">
       ${card({title: `${num(jobs.running)} Agenten-Jobs laufen`, sub: 'Jobs mit aktivem Prozess', as_of: jobs.as_of || m.as_of, maxAge: 45, body: (jobs.list || []).length ? `<div class="tbl-wrap"><table><thead><tr><th>Job</th><th>Engine</th><th class="r">seit</th></tr></thead><tbody>${jobs.list.slice(0, 8).map(j => `<tr><td>${esc(j.name)}</td><td>${esc(j.engine || '')}</td><td class="r">${j.started ? ago(j.started).replace('vor ', '') : '–'}</td></tr>`).join('')}</tbody></table></div>${jobs.list.length > 8 ? `<details class="more"><summary>Alle ${jobs.list.length} anzeigen</summary><div class="tbl-wrap"><table><tbody>${jobs.list.slice(8).map(j => `<tr><td>${esc(j.name)}</td><td>${esc(j.engine || '')}</td><td class="r">${j.started ? ago(j.started).replace('vor ', '') : '–'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}` : noData('Keine laufenden Jobs gefunden.')})}
       ${card({title: fuN ? `${fuN} fehlgeschlagene Dienste` : 'Alle Dienste laufen', sub: `Sandy ${num(fu.Sandy)} · LeChonk ${num(fu.LeChonk)} · sandy-prod ${num(fu['sandy-prod'])}`, as_of: h.as_of, maxAge: 90, body: (h.findings || []).length ? `<ul class="reasons">${h.findings.slice(0, 6).map(f => `<li><span class="dot warn" aria-hidden="true"></span><span>${esc(f)}</span></li>`).join('')}</ul>` : `<div class="empty"><span class="big" aria-hidden="true">✓</span><span>Keine offenen Befunde.</span></div>`})}
